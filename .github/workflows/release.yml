@@ -3,7 +3,7 @@ name: Release NuGet Package and Create GitHub Release
 env:
   DOTNET_VERSION: '8.0.x'
   # Asegúrate que este PROJECT_NAME coincida con el <PackageId> en tu .csproj
-  PROJECT_NAME: PrimeService_WS
+  PROJECT_NAME: PrimeService_WS2
   PROJECT_PATH: PrimeService/Primes.Lib/Primes.Lib.csproj
   TEST_PROJECT_PATH: PrimeService/Primes.Tests/Primes.Tests.csproj
   PACKAGE_OUTPUT_DIRECTORY: out
