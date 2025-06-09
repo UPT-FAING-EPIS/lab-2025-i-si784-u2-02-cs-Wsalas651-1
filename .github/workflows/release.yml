@@ -1,4 +1,4 @@
-name: MyMath - Release NuGet Package and Create GitHub Release
+name: Release NuGet Package and Create GitHub Release
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -16,7 +16,7 @@ on:
 
 jobs:
   build-test-publish-release:
-    name: Build, Test, Publish MyMath Package and Create Release
+    name: Build, Test, Publish Prime Service Package and Create Release
     runs-on: ubuntu-latest
     permissions:
       contents: write 
