@@ -1,51 +1,95 @@
-name: Generar NuGetPackage
+name: MyMath - Release NuGet Package and Create GitHub Release
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  # Asegúrate que este PROJECT_NAME coincida con el <PackageId> en tu .csproj
+  PROJECT_NAME: PrimeService_WS
+  PROJECT_PATH: PrimeService/Primes.Lib/Primes.Lib.csproj
+  TEST_PROJECT_PATH: PrimeService/Primes.Tests/Primes.Tests.csproj
+  PACKAGE_OUTPUT_DIRECTORY: out
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main # Se activa cuando haces push a la rama main
+  workflow_dispatch: # Te permite ejecutarlo manualmente también
 
 jobs:
-  release:
+  build-test-publish-release:
+    name: Build, Test, Publish MyMath Package and Create Release
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      packages: write
+      contents: write 
+      packages: write 
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.PROJECT_PATH }} && dotnet restore ${{ env.TEST_PROJECT_PATH }}
 
-      - name: Set version in .csproj
-        run: sed -i.bak "s|<Version>.*</Version>|<Version>${VERSION}</Version>|" PrimeService/Primes.Lib/Primes.Lib.csproj
+    - name: Run Unit Tests
+      run: dotnet test ${{ env.TEST_PROJECT_PATH }} --no-restore --logger trx
 
-      - name: Clean sed backup file
-        run: rm PrimeService/Primes.Lib/Primes.Lib.csproj.bak
+    - name: Build project
+      run: dotnet build ${{ env.PROJECT_PATH }} -c Release --no-restore
 
-      - name: Restore dependencies
-        run: dotnet restore PrimeService/Primes.Lib/Primes.Lib.csproj
+    - name: Get Package Version from .csproj
+      id: package_info
+      run: |
+        # Extrae la versión del archivo .csproj
+        # Este comando busca la etiqueta <Version> dentro de <PropertyGroup>
+        VERSION=$(grep -oP '(?<=<Version>).*(?=</Version>)' ${{ env.PROJECT_PATH }} | head -n 1)
+        
+        if [ -z "$VERSION" ]; then
+          echo "Error: No se pudo extraer la versión del archivo ${{ env.PROJECT_PATH }}"
+          exit 1
+        fi
+        
+        echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+        echo "version_tag=v$VERSION" >> $GITHUB_ENV 
+        echo "Versión del paquete leída del .csproj: $VERSION"
 
-      - name: Build the project
-        run: dotnet build PrimeService/Primes.Lib/Primes.Lib.csproj --configuration Release
+    - name: Create NuGet Package
+      run: |
+        echo "Empaquetando ${{ env.PROJECT_NAME }} con versión: ${{ env.PACKAGE_VERSION }}"
+        # Ya no es necesario pasar /p:PackageVersion porque dotnet pack leerá la versión del .csproj
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          -c Release \
+          --no-build \
+          -o ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
 
-      - name: Pack the NuGet package
-        run: dotnet pack PrimeService/Primes.Lib/Primes.Lib.csproj -c Release
+    - name: Setup NuGet Source for GitHub Packages
+      run: |
+        dotnet nuget add source --username ${{ github.actor }} \
+          --password ${{ secrets.GH_TOKEN }} \
+          --store-password-in-clear-text \
+          --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
 
-      - name: Publish package to GitHub Packages
-        run: dotnet nuget push PrimeService/Primes.Lib/bin/Release/*.nupkg --skip-duplicate --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --api-key ${{ secrets.GH_TOKEN }}
+    - name: Publish NuGet Package to GitHub Packages
+      run: |
+        # El nombre del archivo nupkg se forma como <PackageId>.<Version>.nupkg
+        dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/${{ env.PROJECT_NAME }}.${{ env.PACKAGE_VERSION }}.nupkg" \
+          --api-key ${{ secrets.GH_TOKEN }} \
+          --source "github" \
+          --skip-duplicate
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          files: "PrimeService/Primes.Lib/bin/Release/*.nupkg"
+    - name: Create GitHub Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: ${{ env.version_tag }} 
+        name: "Release ${{ env.version_tag }} (${{ env.PROJECT_NAME }})"
+        body: |
+          Release del paquete ${{ env.PROJECT_NAME }} versión ${{ env.PACKAGE_VERSION }}.
+          Contiene el archivo NuGet generado.
+        artifacts: "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/${{ env.PROJECT_NAME }}.${{ env.PACKAGE_VERSION }}.nupkg"
+        token: ${{ secrets.GH_TOKEN }}
+        allowUpdates: true
