@@ -1,0 +1,132 @@
+name: Documentación con DocFX
+
+on:
+  push:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '8.0'
+
+jobs:
+  build-and-deploy-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurando la versión de NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install DocFX
+        run: dotnet tool install -g docfx
+
+      - name: Restore & Build project
+        run: |
+          dotnet restore PrimeService/Primes.Lib/Primes.Lib.csproj
+          dotnet build PrimeService/Primes.Lib/Primes.Lib.csproj --configuration Release
+
+      - name: Generate coverage Report
+        run: |
+          dotnet test PrimeService/Primes.Tests/Primes.Tests.csproj --collect:"XPlat Code Coverage"
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          reportgenerator "-reports:PrimeService/Primes.Tests/TestResults/**/*.cobertura.xml" "-targetdir:Cobertura" -reporttypes:MarkdownSummaryGithub
+
+      - name: Inicializar DocFX
+        run: |
+          docfx init -y
+
+      - name: Limpiar el directorio docs
+        run: |
+          rm -rf docs/*
+
+      - name: Modificar archivo docfx.json
+        run: |
+          cat > docfx.json <<EOF
+          {
+            "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+            "metadata": [
+              {
+                "src": [
+                  {
+                    "src": ".",
+                    "files": [
+                      "**/*.csproj"
+                    ]
+                  }
+                ],
+                "dest": "docs"
+              }
+            ],
+            "build": {
+              "content": [
+                {
+                  "files": [
+                    "**/*.{md,yml}"
+                  ],
+                  "exclude": [
+                    "_site/**",
+                    "Cobertura/index.html",
+                    "docs/Primes.Lib.html"
+                  ]
+                }
+              ],
+              "resource": [
+                {
+                  "files": [
+                    "images/**"
+                  ]
+                }
+              ],
+              "output": "_site",
+              "template": [
+                "default",
+                "modern"
+              ],
+              "globalMetadata": {
+                "_appName": "PrimeService",
+                "_appTitle": "PrimeService",
+                "_enableSearch": true,
+                "pdf": true
+              }
+            }
+          }
+          EOF
+
+      - name: Modificar archivo toc.yml
+        run: |
+          cat > toc.yml <<EOF
+          - name: Docs
+            href: docs/
+          EOF
+
+      - name: Modificar archivo index.md
+        run: |
+          cat > index.md <<EOF
+          ---
+          _layout: landing
+          ---
+
+          # Proyecto PrimeService
+
+          ## [Reporte Cobertura HTML](Cobertura/index.html)
+
+          ## [Reporte Cobertura Markdown](Cobertura/SummaryGithub.md)
+          
+          ## [Documentacion de Clases, atributos y métodos](docs/Primes.Lib.html)
+
+          ## [Diagrama de Clases](clases.md)
+          EOF
+
+      - name: Generate DocFX metadata and site
+        run: |
+          docfx metadata docfx.json
+          docfx build docfx.json
+
+      - name: Publish to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          keep_files: true
